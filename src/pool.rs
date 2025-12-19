@@ -33,6 +33,10 @@ impl<T> PoolRcRef<T> {
             },
         })
     }
+
+    fn push(&self, value: T) {
+        self.rc.borrow_mut().stack.push(value);
+    }
 }
 
 struct PoolGuard<T> {
