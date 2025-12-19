@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 struct Pool<T> {
     stack: Vec<T>,
 }
@@ -12,4 +14,9 @@ impl<T: Default> Pool<T> {
 
         Self { stack }
     }
+}
+
+struct PoolGuard<T> {
+    value: T,
+    pool: Rc<Pool<T>>,
 }
