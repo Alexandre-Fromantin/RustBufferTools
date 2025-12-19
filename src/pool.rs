@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, mem::ManuallyDrop, rc::Rc};
 
 struct Pool<T> {
     stack: Vec<T>,
@@ -27,7 +27,7 @@ impl<T> PoolRcRef<T> {
         let get_value = self.rc.borrow_mut().stack.pop()?;
 
         Some(PoolGuard {
-            value: get_value,
+            value: ManuallyDrop::new(get_value),
             pool_ref: PoolRcRef {
                 rc: self.rc.clone(),
             },
@@ -40,6 +40,13 @@ impl<T> PoolRcRef<T> {
 }
 
 struct PoolGuard<T> {
-    value: T,
+    value: ManuallyDrop<T>,
     pool_ref: PoolRcRef<T>,
+}
+
+impl<T> Drop for PoolGuard<T> {
+    fn drop(&mut self) {
+        let value = unsafe { ManuallyDrop::take(&mut self.value) };
+        self.pool_ref.push(value);
+    }
 }
