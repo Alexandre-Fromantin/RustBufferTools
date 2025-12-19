@@ -4,28 +4,38 @@ struct Pool<T> {
     stack: Vec<T>,
 }
 
+struct PoolRcRef<T> {
+    rc: Rc<RefCell<Pool<T>>>,
+}
+
 impl<T: Default> Pool<T> {
-    pub fn new(capacity: usize) -> Rc<RefCell<Self>> {
+    pub fn build(capacity: usize) -> PoolRcRef<T> {
         let mut stack = Vec::with_capacity(capacity);
 
         for _ in 0..capacity {
             stack.push(T::default());
         }
 
-        Rc::new(RefCell::new(Self { stack }))
+        PoolRcRef {
+            rc: Rc::new(RefCell::new(Self { stack })),
+        }
     }
+}
 
-    pub fn get(pool: Rc<RefCell<Self>>) -> Option<PoolGuard<T>> {
-        let get_value = pool.borrow_mut().stack.pop()?;
+impl<T> PoolRcRef<T> {
+    pub fn get(&self) -> Option<PoolGuard<T>> {
+        let get_value = self.rc.borrow_mut().stack.pop()?;
 
         Some(PoolGuard {
             value: get_value,
-            pool: Rc::clone(&pool),
+            pool_ref: PoolRcRef {
+                rc: self.rc.clone(),
+            },
         })
     }
 }
 
 struct PoolGuard<T> {
     value: T,
-    pool: Rc<RefCell<Pool<T>>>,
+    pool_ref: PoolRcRef<T>,
 }
