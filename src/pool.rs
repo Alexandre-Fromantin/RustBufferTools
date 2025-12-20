@@ -1,4 +1,9 @@
-use std::{cell::RefCell, mem::ManuallyDrop, rc::Rc};
+use std::{
+    cell::RefCell,
+    mem::ManuallyDrop,
+    ops::{Deref, DerefMut},
+    rc::Rc,
+};
 
 struct Pool<T> {
     stack: Vec<T>,
@@ -48,5 +53,19 @@ impl<T> Drop for PoolGuard<T> {
     fn drop(&mut self) {
         let value = unsafe { ManuallyDrop::take(&mut self.value) };
         self.pool_ref.push(value);
+    }
+}
+
+impl<T> Deref for PoolGuard<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<T> DerefMut for PoolGuard<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
     }
 }
