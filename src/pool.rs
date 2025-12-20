@@ -8,7 +8,7 @@ use std::{
 struct Pool<T> {
     stack: Vec<T>,
 }
-
+#[derive(Clone)]
 struct PoolRcRef<T> {
     rc: Rc<RefCell<Pool<T>>>,
 }
@@ -67,5 +67,76 @@ impl<T> Deref for PoolGuard<T> {
 impl<T> DerefMut for PoolGuard<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stack() {
+        let pool: PoolRcRef<u32> = Pool::build(150);
+        for _ in 0..150 {
+            pool.get();
+        }
+
+        let mut guard_list = Vec::new();
+        for _ in 0..150 {
+            guard_list.push(pool.get());
+        }
+
+        assert!(pool.get().is_none());
+    }
+
+    #[test]
+    fn test_stack_v2() {
+        let pool: PoolRcRef<u32> = Pool::build(150);
+        for _ in 0..150 {
+            pool.get();
+        }
+
+        let mut guard_list = Vec::new();
+        for _ in 0..148 {
+            guard_list.push(pool.get());
+        }
+
+        let value_1 = pool.get();
+        assert!(value_1.is_some());
+
+        let value_2 = pool.get();
+        assert!(value_2.is_some());
+
+        assert!(pool.get().is_none());
+    }
+
+    #[test]
+    fn test_stack_v3() {
+        let pool: PoolRcRef<u32> = Pool::build(150);
+
+        let mut temp = pool.get().unwrap();
+        *temp = 99;
+        drop(temp);
+
+        for _ in 0..1000 {
+            let value = pool.get().unwrap();
+            assert_eq!(*value, 99);
+        }
+    }
+
+    #[test]
+    fn test_stack_clone() {
+        let pool: PoolRcRef<u32> = Pool::build(150);
+        for _ in 0..150 {
+            let mut value = pool.get().unwrap();
+            *value = 5
+        }
+
+        let pool_2 = pool.clone();
+
+        for _ in 0..150 {
+            let value = pool_2.get().unwrap();
+            assert_eq!(*value, 5)
+        }
     }
 }
