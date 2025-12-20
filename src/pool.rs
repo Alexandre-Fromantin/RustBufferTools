@@ -5,8 +5,15 @@ use std::{
     rc::Rc,
 };
 
+struct PoolConfig {
+    min_allocation: usize,
+    max_allocation: usize,
+}
+
 struct Pool<T> {
-    stack: Vec<T>,
+    config: PoolConfig,
+    free_stack: Vec<T>,
+    nb_allocation: usize,
 }
 
 #[derive(Clone)]
@@ -15,22 +22,34 @@ struct PoolRcRef<T> {
 }
 
 impl<T: Default> Pool<T> {
-    pub fn build(capacity: usize) -> PoolRcRef<T> {
-        let mut stack = Vec::with_capacity(capacity);
+    pub fn build(config: PoolConfig) -> PoolRcRef<T> {
+        let mut free_stack = Vec::with_capacity(config.min_allocation);
 
-        for _ in 0..capacity {
-            stack.push(T::default());
+        for _ in 0..config.min_allocation {
+            free_stack.push(T::default());
         }
 
         PoolRcRef {
-            rc: Rc::new(RefCell::new(Self { stack })),
+            rc: Rc::new(RefCell::new(Self {
+                free_stack,
+                nb_allocation: config.min_allocation,
+                config,
+            })),
         }
     }
 }
 
-impl<T> PoolRcRef<T> {
+impl<T: Default> PoolRcRef<T> {
     pub fn acquire(&self) -> Option<PoolGuard<T>> {
-        let acquire_value = self.rc.borrow_mut().stack.pop()?;
+        let mut pool = self.rc.borrow_mut();
+
+        let acquire_value = pool.free_stack.pop().or_else(|| {
+            if pool.nb_allocation == pool.config.max_allocation {
+                return None;
+            }
+            pool.nb_allocation += 1;
+            Some(T::default())
+        })?;
 
         Some(PoolGuard {
             value: ManuallyDrop::new(acquire_value),
@@ -41,23 +60,30 @@ impl<T> PoolRcRef<T> {
     }
 
     fn release(&self, value: T) {
-        self.rc.borrow_mut().stack.push(value);
+        let mut pool = self.rc.borrow_mut();
+
+        if pool.free_stack.len() == pool.free_stack.capacity() {
+            //over-allocation
+            return;
+        }
+
+        pool.free_stack.push(value);
     }
 }
 
-struct PoolGuard<T> {
+struct PoolGuard<T: Default> {
     value: ManuallyDrop<T>,
     pool_ref: PoolRcRef<T>,
 }
 
-impl<T> Drop for PoolGuard<T> {
+impl<T: Default> Drop for PoolGuard<T> {
     fn drop(&mut self) {
         let value = unsafe { ManuallyDrop::take(&mut self.value) };
         self.pool_ref.release(value);
     }
 }
 
-impl<T> Deref for PoolGuard<T> {
+impl<T: Default> Deref for PoolGuard<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -65,7 +91,7 @@ impl<T> Deref for PoolGuard<T> {
     }
 }
 
-impl<T> DerefMut for PoolGuard<T> {
+impl<T: Default> DerefMut for PoolGuard<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.value
     }
@@ -77,7 +103,10 @@ mod tests {
 
     #[test]
     fn test_stack() {
-        let pool: PoolRcRef<u32> = Pool::build(150);
+        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+            min_allocation: 150,
+            max_allocation: 150,
+        });
         for _ in 0..150 {
             pool.acquire();
         }
@@ -92,7 +121,10 @@ mod tests {
 
     #[test]
     fn test_stack_v2() {
-        let pool: PoolRcRef<u32> = Pool::build(150);
+        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+            min_allocation: 150,
+            max_allocation: 150,
+        });
         for _ in 0..150 {
             pool.acquire();
         }
@@ -113,7 +145,10 @@ mod tests {
 
     #[test]
     fn test_stack_v3() {
-        let pool: PoolRcRef<u32> = Pool::build(150);
+        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+            min_allocation: 150,
+            max_allocation: 150,
+        });
 
         let mut temp = pool.acquire().unwrap();
         *temp = 99;
@@ -126,8 +161,55 @@ mod tests {
     }
 
     #[test]
+    fn test_stack_v4() {
+        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+            min_allocation: 150,
+            max_allocation: 200,
+        });
+
+        for _ in 0..200 {
+            pool.acquire();
+        }
+
+        let mut guard_list = Vec::new();
+        for _ in 0..200 {
+            guard_list.push(pool.acquire());
+        }
+
+        assert!(pool.acquire().is_none());
+    }
+
+    #[test]
+    fn test_stack_v5() {
+        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+            min_allocation: 150,
+            max_allocation: 170,
+        });
+
+        let mut guard_list = Vec::new();
+        for _ in 0..150 {
+            let value = pool.acquire();
+            assert!(value.is_some());
+            guard_list.push(value);
+        }
+
+        for _ in 0..20 {
+            let value = pool.acquire();
+            assert!(value.is_some());
+            guard_list.push(value);
+        }
+
+        for _ in 0..50 {
+            assert!(pool.acquire().is_none());
+        }
+    }
+
+    #[test]
     fn test_stack_clone() {
-        let pool: PoolRcRef<u32> = Pool::build(150);
+        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+            min_allocation: 150,
+            max_allocation: 150,
+        });
         for _ in 0..150 {
             let mut value = pool.acquire().unwrap();
             *value = 5
