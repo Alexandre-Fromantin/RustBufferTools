@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::UnsafeCell,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     rc::Rc,
@@ -17,20 +17,20 @@ struct Pool<T> {
 }
 
 #[derive(Clone)]
-struct PoolRcRef<T> {
-    rc: Rc<RefCell<Pool<T>>>,
+struct PoolRef<T> {
+    pool_ref: Rc<UnsafeCell<Pool<T>>>,
 }
 
 impl<T: Default> Pool<T> {
-    pub fn build(config: PoolConfig) -> PoolRcRef<T> {
+    pub fn build(config: PoolConfig) -> PoolRef<T> {
         let mut free_stack = Vec::with_capacity(config.min_allocation);
 
         for _ in 0..config.min_allocation {
             free_stack.push(T::default());
         }
 
-        PoolRcRef {
-            rc: Rc::new(RefCell::new(Self {
+        PoolRef {
+            pool_ref: Rc::new(UnsafeCell::new(Self {
                 free_stack,
                 nb_allocation: config.min_allocation,
                 config,
@@ -39,9 +39,9 @@ impl<T: Default> Pool<T> {
     }
 }
 
-impl<T: Default> PoolRcRef<T> {
+impl<T: Default> PoolRef<T> {
     pub fn acquire(&self) -> Option<PoolGuard<T>> {
-        let mut pool = self.rc.borrow_mut();
+        let pool = unsafe { &mut *self.pool_ref.get() };
 
         let acquire_value = pool.free_stack.pop().or_else(|| {
             if pool.nb_allocation == pool.config.max_allocation {
@@ -53,14 +53,14 @@ impl<T: Default> PoolRcRef<T> {
 
         Some(PoolGuard {
             value: ManuallyDrop::new(acquire_value),
-            pool_ref: PoolRcRef {
-                rc: self.rc.clone(),
+            pool_ref: PoolRef {
+                pool_ref: self.pool_ref.clone(),
             },
         })
     }
 
     fn release(&self, value: T) {
-        let mut pool = self.rc.borrow_mut();
+        let pool = unsafe { &mut *self.pool_ref.get() };
 
         if pool.free_stack.len() == pool.free_stack.capacity() {
             //over-allocation
@@ -73,7 +73,7 @@ impl<T: Default> PoolRcRef<T> {
 
 struct PoolGuard<T: Default> {
     value: ManuallyDrop<T>,
-    pool_ref: PoolRcRef<T>,
+    pool_ref: PoolRef<T>,
 }
 
 impl<T: Default> Drop for PoolGuard<T> {
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_stack() {
-        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+        let pool: PoolRef<u32> = Pool::build(PoolConfig {
             min_allocation: 150,
             max_allocation: 150,
         });
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn test_stack_v2() {
-        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+        let pool: PoolRef<u32> = Pool::build(PoolConfig {
             min_allocation: 150,
             max_allocation: 150,
         });
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_stack_v3() {
-        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+        let pool: PoolRef<u32> = Pool::build(PoolConfig {
             min_allocation: 150,
             max_allocation: 150,
         });
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_stack_v4() {
-        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+        let pool: PoolRef<u32> = Pool::build(PoolConfig {
             min_allocation: 150,
             max_allocation: 200,
         });
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_stack_v5() {
-        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+        let pool: PoolRef<u32> = Pool::build(PoolConfig {
             min_allocation: 150,
             max_allocation: 170,
         });
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_stack_clone() {
-        let pool: PoolRcRef<u32> = Pool::build(PoolConfig {
+        let pool: PoolRef<u32> = Pool::build(PoolConfig {
             min_allocation: 150,
             max_allocation: 150,
         });
